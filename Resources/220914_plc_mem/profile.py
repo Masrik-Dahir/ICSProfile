@@ -7,6 +7,7 @@ import argparse
 import time
 import csv
 from datetime import datetime
+import pyshark
 
 # Configuration
 CSV_CREATE_FILE = False
@@ -111,32 +112,50 @@ def read_from_profile(plc_ip, start_addr, size, output_file):
     print(f"Memory content written to {file_name}")
 
 
+def process_pcap(pcap_dir, plc_ip):
+    print(f"Processing PCAP files in directory: {pcap_dir} for IP: {plc_ip}")
+    pcap_files = [f for f in os.listdir(pcap_dir) if f.endswith('.pcapng')]
+
+    for pcap_file in pcap_files:
+        file_path = os.path.join(pcap_dir, pcap_file)
+        print(f"Analyzing {file_path}...")
+        cap = pyshark.FileCapture(file_path, display_filter=f"ip.addr == {plc_ip}" if plc_ip else None)
+
+        for packet in cap:
+            print(packet)
+        cap.close()
+
+    print("Finished processing PCAP files.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="M221 Control Logic Profile and Reader")
 
-    parser.add_argument("plc_ip", help="IP address of the target PLC")
+    parser.add_argument("--plc-ip", help="IP address of the target PLC", default=None)
     parser.add_argument("--create-profile", action="store_true", help="Create a profile for the PLC")
     parser.add_argument("--read", action="store_true", help="Read memory from PLC using profile")
     parser.add_argument("--start-addr", type=lambda x: int(x, 16), help="Start memory address (in hex)", default=0)
     parser.add_argument("--size", type=lambda x: int(x, 16), help="Byte size to read", default=0)
     parser.add_argument("--output-file", help="Output file name", default="output.bin")
+    parser.add_argument("--pcap-dir", help="Directory containing PCAPNG files to analyze", default=None)
 
     args = parser.parse_args()
 
     if args.create_profile:
-        create_profile(args.plc_ip)
+        if args.plc_ip:
+            create_profile(args.plc_ip)
+        else:
+            print("Error: --create-profile requires --plc-ip.")
 
     if args.read:
-        read_from_profile(args.plc_ip, args.start_addr, args.size, args.output_file)
+        if args.plc_ip:
+            read_from_profile(args.plc_ip, args.start_addr, args.size, args.output_file)
+        else:
+            print("Error: --read requires --plc-ip.")
+
+    if args.pcap_dir:
+        process_pcap(args.pcap_dir, args.plc_ip)
 
 
 if __name__ == "__main__":
     main()
-
-
-# usage: profile.py[-h][--create - profile][--read][--start - addr
-# START_ADDR]
-# [--size SIZE][--output - file
-# OUTPUT_FILE]
-# plc_ip
-
