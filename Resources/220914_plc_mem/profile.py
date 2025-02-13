@@ -202,7 +202,7 @@ protocol_templates = {
 }
 
 # **🔹 Test the function**
-transport_header = "00070000001a015a00fe020a800393543bf093543bf010b2ffff030300140000"
+transport_header = "0050562724f7005056e64cc708004500002801c000008006a82b891e7a97c0a8cc8601f6c11e01fc967d04c029345014faef9a790000000000000000"
 
 detected_profile = detect_protocol(transport_header, protocol_templates)
 
