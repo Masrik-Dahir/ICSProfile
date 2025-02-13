@@ -1,6 +1,5 @@
 {
     "Protocol_Template": {
-        "Name": "Modbus-Umas",
         "Transaction_ID": [
             0,
             2
@@ -63,6 +62,7 @@
                     26
                 ]
             }
-        }
+        },
+        "Name": "Modbus-Umas"
     }
 }

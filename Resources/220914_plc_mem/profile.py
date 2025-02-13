@@ -1,5 +1,40 @@
-import binascii
+import sys
+import os
 import json
+import pyshark
+import binascii
+import socket
+import struct
+from datetime import datetime
+import argparse
+
+def extract_packet_data(pcap_file):
+    raw_packets = []
+    cap = pyshark.FileCapture(pcap_file, use_json=True, include_raw=True)
+
+    for packet in cap:
+        raw_packet = binascii.hexlify(bytes.fromhex(packet.frame_raw.value)).decode() if hasattr(packet,
+                                                                                                 'frame_raw') else ""
+
+        if raw_packet:
+            raw_packets.append(raw_packet)
+
+    cap.close()
+    return raw_packets
+
+
+def process_pcap_directory(pcap_dir):
+    pcap_files = [f for f in os.listdir(pcap_dir) if f.endswith('.pcapng')]
+    all_raw_packets = []
+
+    for pcap_file in pcap_files:
+        file_path = os.path.join(pcap_dir, pcap_file)
+        print(f"Processing {file_path}...")
+        raw_packets = extract_packet_data(file_path)
+        all_raw_packets.extend(raw_packets)
+
+    return all_raw_packets
+
 
 def get_nesting_depth(template, depth=0):
     """ Recursively determine the depth of a nested protocol template """
@@ -12,16 +47,8 @@ def detect_protocol(transport_header: str, protocol_templates: dict) -> dict:
     """
     Detects the transport protocol and generates a JSON profile in the required format.
     Prefers templates with nested protocols before simpler ones.
-
-    Parameters:
-    - transport_header (str): Hexadecimal string representing the transport header.
-    - protocol_templates (dict): Dictionary containing protocol field structures.
-
-    Returns:
-    - dict: JSON structure with detected protocol fields in the required format.
     """
 
-    # Convert transport header from hex string to bytes
     transport_header = binascii.unhexlify(transport_header)
 
     if len(transport_header) < 2:
@@ -30,7 +57,6 @@ def detect_protocol(transport_header: str, protocol_templates: dict) -> dict:
     raw_packet = transport_header
 
     # Sort protocols to prioritize ones with nested structures (e.g., Modbus-Umas before Modbus)
-    # sorted_protocols = sorted(protocol_templates.items(), key=lambda x: x[1].get("depth", 1), reverse=True)
     sorted_protocols = sorted(protocol_templates.items(), key=lambda x: get_nesting_depth(x[1]["Protocol_Template"]),
                               reverse=True)
 
@@ -50,7 +76,7 @@ def detect_protocol(transport_header: str, protocol_templates: dict) -> dict:
         # Generate the profile with offsets
         profile = {
             "Protocol_Template": {
-                "Name": template["Protocol_Template"].get("Name", protocol_name)  # Ensure Name is correctly assigned
+                "Name": template["Protocol_Template"].get("Name", protocol_name)
             }
         }
 
@@ -69,14 +95,10 @@ def detect_protocol(transport_header: str, protocol_templates: dict) -> dict:
         return profile  # Return first matching protocol
 
     return {"Protocol_Template": {"Name": "Other"}}  # No match found
-def save_profile_json(data, filename="profile.json"):
-    """
-    Saves the protocol profile in the required format to a JSON file.
 
-    Parameters:
-    - data (dict): The protocol profile data.
-    - filename (str): The output JSON file name.
-    """
+
+def save_profile_json(data, filename="profile.json"):
+    """ Saves the protocol profile in the required format to a JSON file. """
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
     print(f"Profile saved to {filename}")
@@ -155,7 +177,7 @@ protocol_templates = {
             "Cycle_Counter": None
         }
     },
-"OPC UA": {
+    "OPC UA": {
         "Protocol_Template": {
             "Name": "OPC UA",
             "Transaction_ID": None,
@@ -200,11 +222,48 @@ protocol_templates = {
         }
     }
 }
+def save_profile_json(data, filename="profile.json"):
+    """ Saves the profile data in the required format to a JSON file. """
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
+    print(f"Profile saved to {filename}")
 
-# **🔹 Test the function**
-transport_header = "0050562724f7005056e64cc708004500002801c000008006a82b891e7a97c0a8cc8601f6c11e01fc967d04c029345014faef9a790000000000000000"
+from collections import Counter
 
-detected_profile = detect_protocol(transport_header, protocol_templates)
+from collections import Counter
 
-# **🔹 Save to profile.json**
-save_profile_json(detected_profile)
+
+def main():
+    parser = argparse.ArgumentParser(description="PCAP Packet Extractor")
+    parser.add_argument("--pcap-dir", help="Directory containing PCAPNG files", required=True)
+    parser.add_argument("--output-file", help="Output file name for extracted packet data", default="profile.json")
+    args = parser.parse_args()
+
+    # Process the directory and get the raw packets
+    all_raw_packets = process_pcap_directory(args.pcap_dir)
+
+    # Dictionary to count occurrences of each detected profile
+    profile_counts = Counter()
+
+    # **🔹 Test protocol detection for each raw packet**
+    for raw_packet in all_raw_packets:
+        detected_profile = detect_protocol(raw_packet, protocol_templates)
+        profile_name = detected_profile["Protocol_Template"]["Name"]  # Get the profile name
+        profile_counts[profile_name] += 1
+
+    # Show the profile counts in the output (dictionary result)
+    print("Profile counts:", dict(profile_counts))
+
+    # Select the profile with the highest count (majority)
+    majority_profile_name = profile_counts.most_common(1)[0][0]
+
+    # Prepare the final profile using the majority profile template
+    majority_profile_template = protocol_templates.get(majority_profile_name, {})
+    majority_profile_template["Protocol_Template"]["Name"] = majority_profile_name
+
+    # Save the majority profile and counts to the output file
+    save_profile_json(majority_profile_template, args.output_file)  # Save the final profile to the JSON file
+
+
+if __name__ == "__main__":
+    main()
