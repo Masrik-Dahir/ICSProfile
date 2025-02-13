@@ -6,19 +6,11 @@ import time
 import csv
 from datetime import datetime
 
-# Modbus TCP Configuration
-PORT = 502
+# Default Modbus TCP Port
+DEFAULT_PORT = 502
 
 def load_protocol_template(file_path):
-    """
-    Loads the protocol template from a JSON file.
-
-    Parameters:
-    - file_path (str): Path to the profile.json file.
-
-    Returns:
-    - dict: Parsed JSON data containing protocol templates.
-    """
+    """Loads the protocol template from a JSON file."""
     try:
         with open(file_path, "r") as f:
             return json.load(f)
@@ -49,14 +41,13 @@ def capture_tcp_payload(plc_ip, port, interface="eth0", timeout=10):
 
         # Iterate through captured packets
         for packet in capture.sniff_continuously(timeout=timeout):
-            if "TCP" in packet:
-                if hasattr(packet.tcp, "payload"):
-                    # Extract and return the payload as bytes
-                    payload_hex = packet.tcp.payload.replace(":", "")
-                    payload_bytes = binascii.unhexlify(payload_hex)
+            if "TCP" in packet and hasattr(packet.tcp, "payload"):
+                # Extract and return the payload as bytes
+                payload_hex = packet.tcp.payload.replace(":", "")
+                payload_bytes = binascii.unhexlify(payload_hex)
 
-                    print(f"Captured TCP Payload: {payload_bytes.hex()}")
-                    return payload_bytes
+                print(f"Captured TCP Payload: {payload_bytes.hex()}")
+                return payload_bytes
 
         print("No matching packets found.")
         return b""
@@ -70,14 +61,6 @@ def extract_fields(raw_data, protocol_template, depth=0):
     """
     Recursively extracts fields from a protocol template.
     Adds "Payload" field to the last nested level.
-
-    Parameters:
-    - raw_data (bytes): The raw protocol data.
-    - protocol_template (dict): The protocol template with field offsets.
-    - depth (int): Current recursion depth.
-
-    Returns:
-    - dict: Extracted fields with nested protocols preserved.
     """
     extracted_data = {}
     last_offset = 0  # Track highest used offset
@@ -105,13 +88,6 @@ def generate_protocol_data(raw_data, protocol_template):
     """
     Parses a protocol's raw data and extracts field values based on the JSON template.
     Supports nested protocol extraction.
-
-    Parameters:
-    - raw_data (bytes): The raw protocol data.
-    - protocol_template (dict): The protocol template with field offsets.
-
-    Returns:
-    - dict: A dictionary containing extracted fields from the raw data.
     """
     # Ensure the raw data is a bytes object
     if not isinstance(raw_data, bytes):
@@ -130,10 +106,27 @@ def generate_protocol_data(raw_data, protocol_template):
     return protocol_data
 
 
+def parse_ip_port(ip_port_str):
+    """
+    Parses an IP:PORT string and returns the IP and port as separate values.
+    If no port is provided, defaults to 502.
+
+    Parameters:
+    - ip_port_str (str): IP:PORT string.
+
+    Returns:
+    - (str, int): Parsed IP and port.
+    """
+    parts = ip_port_str.split(":")
+    ip = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else DEFAULT_PORT
+    return ip, port
+
+
 def main():
     parser = argparse.ArgumentParser(description="PLC Network Traffic Analyzer")
 
-    parser.add_argument("plc_ip", help="IP address of the target PLC")
+    parser.add_argument("plc_ip", help="IP address and port of the target PLC (format: IP:PORT)")
     parser.add_argument("interface", help="Network interface to capture packets on")
     parser.add_argument("output_file", help="Output file name", nargs='?', default=None)
 
@@ -144,13 +137,16 @@ def main():
 
     args = parser.parse_args()
 
+    # Parse PLC IP and Port from the argument
+    plc_ip, port = parse_ip_port(args.plc_ip)
+
     global_counter = 0
 
     while True:  # Infinite loop until user stops or repeat is not specified
         start_time = time.time()
 
         # Capture data from the network
-        tcp_payload = capture_tcp_payload(args.plc_ip, PORT, args.interface, args.timeout)
+        tcp_payload = capture_tcp_payload(plc_ip, port, args.interface, args.timeout)
 
         if not tcp_payload:
             print("No data captured from PLC.")
