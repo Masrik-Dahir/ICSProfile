@@ -1,0 +1,68 @@
+{
+    "Protocol_Template": {
+        "Name": "Modbus-Umas",
+        "Transaction_ID": [
+            0,
+            2
+        ],
+        "Protocol_ID": [
+            2,
+            4
+        ],
+        "Length": [
+            4,
+            6
+        ],
+        "Unit_ID": [
+            6,
+            7
+        ],
+        "Function_Code": [
+            7,
+            8
+        ],
+        "Source": null,
+        "Destination": null,
+        "Control": null,
+        "Application_Control": null,
+        "Message_Type": null,
+        "Service": null,
+        "Request_ID": null,
+        "Response_Code": null,
+        "Service_Type": null,
+        "Frame_ID": null,
+        "Cycle_Counter": null,
+        "UMAS": {
+            "Protocol_Template": {
+                "Header": [
+                    8,
+                    10
+                ],
+                "Subfunction": [
+                    10,
+                    12
+                ],
+                "Session_ID": [
+                    12,
+                    14
+                ],
+                "Device_ID": [
+                    14,
+                    18
+                ],
+                "Request_ID": [
+                    18,
+                    22
+                ],
+                "Command_Code": [
+                    22,
+                    24
+                ],
+                "Status": [
+                    24,
+                    26
+                ]
+            }
+        }
+    }
+}

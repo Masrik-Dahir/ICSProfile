@@ -55,7 +55,7 @@ class M221_cl_injector():
 
     def send_recv_msg(self, modbus_data):
         self.send_counter += 1
-        print "#", self.send_counter, "#"
+        print("#", self.send_counter, "#")
 
         self.len = len(modbus_data) + len(self.unitID) + len(self.fnc)  
         tcp_payload = struct.pack(">H", self.tranID) + self.proto + struct.pack(">H", self.len) + self.unitID + self.fnc + modbus_data
@@ -65,12 +65,12 @@ class M221_cl_injector():
         
         s = binascii.hexlify(tcp_payload)
         t = iter(s)
-        print "--> " + ':'.join(a+b for a,b in zip(t,t)) + " (" + str(len(tcp_payload)) + ")"
+        print("--> " + ':'.join(a+b for a,b in zip(t,t)) + " (" + str(len(tcp_payload)) + ")")
 
         recv_buf = self.sock.recv(1000)
         r = binascii.hexlify(recv_buf)
         t = iter(r)
-        print "<-- " + ':'.join(a+b for a,b in zip(t,t)) + " (" + str(len(recv_buf)) + ")"
+        print("<-- " + ':'.join(a+b for a,b in zip(t,t)) + " (" + str(len(recv_buf)) + ")")
 
         return recv_buf
 
@@ -86,7 +86,7 @@ class M221_cl_injector():
     def set_m221_session_id(self):
         sid_req_payload = '\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
         self.m221_sid = self.send_recv_msg(sid_req_payload)[-1]
-        print "m221 session id: " + binascii.hexlify(self.m221_sid)
+        print("m221 session id: " + binascii.hexlify(self.m221_sid))
 
     """
     def write_program(self):
@@ -218,9 +218,6 @@ def main():
         print("Waiting for {0} seconds before repeating".format(args.repeat))
         time.sleep(args.repeat)  # Pause for the specified number of seconds
         global_counter += 1
-
-
-
 
 if __name__ == '__main__':
     main()

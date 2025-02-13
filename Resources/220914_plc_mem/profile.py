@@ -1,161 +1,210 @@
-import sys
-import os
-import struct
 import binascii
-import socket
-import argparse
-import time
-import csv
-from datetime import datetime
-import pyshark
+import json
 
-# Configuration
-CSV_CREATE_FILE = False
-
-# M221 message (modbus payload after the function code) offset in TCP payload
-M221_OFFSET = 8
-MODBUS_PORT = 502
-
-M221_MAX_PAYLOAD_SIZE = 236
-MIN_CONTROL_LOGIC = 6
-FRONT_PADDING_SIZE = 230
-BACK_PADDING_SIZE = 235
+def get_nesting_depth(template, depth=0):
+    """ Recursively determine the depth of a nested protocol template """
+    if isinstance(template, dict):
+        return max([get_nesting_depth(value, depth + 1) for value in template.values()] + [depth])
+    return depth
 
 
-class M221_cl_injector():
-    def __init__(self, targetIP):
-        self.tranID = 1
-        self.proto = '\x00\x00'
-        self.len = 0
-        self.unitID = '\x01'
-        self.fnc = '\x5a'
-        self.m221_sid = '\x00'
-        self.send_counter = 0
+def detect_protocol(transport_header: str, protocol_templates: dict) -> dict:
+    """
+    Detects the transport protocol and generates a JSON profile in the required format.
+    Prefers templates with nested protocols before simpler ones.
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((targetIP, MODBUS_PORT))
+    Parameters:
+    - transport_header (str): Hexadecimal string representing the transport header.
+    - protocol_templates (dict): Dictionary containing protocol field structures.
 
-        self.set_m221_session_id()
+    Returns:
+    - dict: JSON structure with detected protocol fields in the required format.
+    """
 
-    def send_recv_msg(self, modbus_data):
-        self.send_counter += 1
-        print("#", self.send_counter, "#")
+    # Convert transport header from hex string to bytes
+    transport_header = binascii.unhexlify(transport_header)
 
-        self.len = len(modbus_data) + len(self.unitID) + len(self.fnc)
-        tcp_payload = struct.pack(">H", self.tranID) + self.proto + struct.pack(">H",
-                                                                                self.len) + self.unitID + self.fnc + modbus_data
-        self.tranID = (self.tranID + 1) % 65536
+    if len(transport_header) < 2:
+        return {"Protocol_Template": {"Name": "Unknown"}}  # Not enough data to analyze
 
-        self.sock.send(tcp_payload)
-        recv_buf = self.sock.recv(1000)
-        return recv_buf
+    raw_packet = transport_header
 
-    def close_socket(self):
-        self.sock.shutdown(socket.SHUT_RDWR)
-        self.sock.close()
+    # Sort protocols to prioritize ones with nested structures (e.g., Modbus-Umas before Modbus)
+    # sorted_protocols = sorted(protocol_templates.items(), key=lambda x: x[1].get("depth", 1), reverse=True)
+    sorted_protocols = sorted(protocol_templates.items(), key=lambda x: get_nesting_depth(x[1]["Protocol_Template"]),
+                              reverse=True)
 
-    def close_connection(self):
-        modbus_data = self.m221_sid + '\x11'
-        self.send_recv_msg(modbus_data)
-        self.close_socket()
+    # Iterate over protocols in priority order
+    for protocol_name, template in sorted_protocols:
+        field_offsets = template["Protocol_Template"]
 
-    def set_m221_session_id(self):
-        sid_req_payload = '\x00' * 40
-        self.m221_sid = self.send_recv_msg(sid_req_payload)[-1]
-        print("m221 session id:", binascii.hexlify(self.m221_sid))
+        # Filter valid offset pairs
+        valid_offsets = [offsets for offsets in field_offsets.values() if isinstance(offsets, list) and len(offsets) == 2]
 
-    def read_mem(self, start_addr, size):
-        max_data_unit = 236
-        addr = start_addr
-        remained = size
-        file_buf = ''
+        # Determine if the packet length is sufficient for this protocol
+        max_offset = max([end for _, end in valid_offsets], default=0)
 
-        while remained > 0:
-            fragment_size = min(remained, max_data_unit)
-            modbus_data = '\x00\x28' + struct.pack("<I", addr) + struct.pack("<H", fragment_size)
-            file_buf += self.send_recv_msg(modbus_data)[M221_OFFSET + 4:]
-            remained -= fragment_size
-            addr += fragment_size
-        return file_buf
+        if len(raw_packet) < max_offset:
+            continue  # Not enough data for this protocol
 
+        # Generate the profile with offsets
+        profile = {
+            "Protocol_Template": {
+                "Name": template["Protocol_Template"].get("Name", protocol_name)  # Ensure Name is correctly assigned
+            }
+        }
 
-def beautify_size(size):
-    if size >= 1024 ** 2:
-        return f"{size / 1024 ** 2:.2f} Mbytes"
-    elif size >= 1024:
-        return f"{size / 1024:.2f} Kbytes"
-    else:
-        return f"{size} bytes"
+        for field, offsets in field_offsets.items():
+            if isinstance(offsets, list) and len(offsets) == 2:
+                profile["Protocol_Template"][field] = offsets
+            elif isinstance(offsets, dict):  # Handle nested protocols like UMAS
+                profile["Protocol_Template"][field] = {
+                    "Protocol_Template": {}
+                }
+                for nested_field, nested_offsets in offsets["Protocol_Template"].items():
+                    profile["Protocol_Template"][field]["Protocol_Template"][nested_field] = nested_offsets
+            else:
+                profile["Protocol_Template"][field] = None  # Preserve structure
 
+        return profile  # Return first matching protocol
 
-def gen_filename(file_name, count):
-    base_name, extension = os.path.splitext(file_name)
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    return f"{base_name}_{timestamp}{extension}"
+    return {"Protocol_Template": {"Name": "Other"}}  # No match found
+def save_profile_json(data, filename="profile.json"):
+    """
+    Saves the protocol profile in the required format to a JSON file.
 
-
-def create_profile(plc_ip):
-    print(f"Creating profile for PLC at {plc_ip}...")
-    injector = M221_cl_injector(plc_ip)
-    injector.close_connection()
-    print("Profile created.")
+    Parameters:
+    - data (dict): The protocol profile data.
+    - filename (str): The output JSON file name.
+    """
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
+    print(f"Profile saved to {filename}")
 
 
-def read_from_profile(plc_ip, start_addr, size, output_file):
-    injector = M221_cl_injector(plc_ip)
-    mem_block = injector.read_mem(start_addr, size)
-    injector.close_connection()
+# **🔹 Updated Protocol Templates (UMAS is Nested Inside Modbus-Umas)**
+protocol_templates = {
+    "Modbus": {
+        "Protocol_Template": {
+            "Transaction_ID": [0, 2],
+            "Protocol_ID": [2, 4],
+            "Length": [4, 6],
+            "Unit_ID": [6, 7],
+            "Function_Code": [7, 8],
+            "Source": None,
+            "Destination": None,
+            "Control": None,
+            "Application_Control": None,
+            "Message_Type": None,
+            "Service": None,
+            "Request_ID": None,
+            "Response_Code": None,
+            "Service_Type": None,
+            "Frame_ID": None,
+            "Cycle_Counter": None
+        }
+    },
+    "Modbus-Umas": {
+        "Protocol_Template": {
+            "Transaction_ID": [0, 2],
+            "Protocol_ID": [2, 4],
+            "Length": [4, 6],
+            "Unit_ID": [6, 7],
+            "Function_Code": [7, 8],
+            "Source": None,
+            "Destination": None,
+            "Control": None,
+            "Application_Control": None,
+            "Message_Type": None,
+            "Service": None,
+            "Request_ID": None,
+            "Response_Code": None,
+            "Service_Type": None,
+            "Frame_ID": None,
+            "Cycle_Counter": None,
+            "UMAS": {
+                "Protocol_Template": {
+                    "Header": [8, 10],
+                    "Subfunction": [10, 12],
+                    "Session_ID": [12, 14],
+                    "Device_ID": [14, 18],
+                    "Request_ID": [18, 22],
+                    "Command_Code": [22, 24],
+                    "Status": [24, 26]
+                }
+            }
+        }
+    },
+    "DNP3": {
+        "Protocol_Template": {
+            "Transaction_ID": None,
+            "Protocol_ID": None,
+            "Length": None,
+            "Unit_ID": None,
+            "Function_Code": [0, 2],
+            "Source": [2, 6],
+            "Destination": [6, 10],
+            "Control": [10, 12],
+            "Application_Control": [12, 14],
+            "Message_Type": None,
+            "Service": None,
+            "Request_ID": None,
+            "Response_Code": None,
+            "Service_Type": None,
+            "Frame_ID": None,
+            "Cycle_Counter": None
+        }
+    },
+"OPC UA": {
+        "Protocol_Template": {
+            "Name": "OPC UA",
+            "Transaction_ID": None,
+            "Protocol_ID": None,
+            "Length": None,
+            "Unit_ID": None,
+            "Function_Code": None,
+            "Source": None,
+            "Destination": None,
+            "Control": None,
+            "Application_Control": None,
+            "Message_Type": [0, 2],
+            "Service": [2, 6],
+            "Request_ID": [6, 10],
+            "Response_Code": [10, 14],
+            "Service_Type": None,
+            "Frame_ID": None,
+            "Cycle_Counter": None,
+            "Payload": None
+        }
+    },
+    "Profinet": {
+        "Protocol_Template": {
+            "Name": "Profinet",
+            "Transaction_ID": None,
+            "Protocol_ID": None,
+            "Length": None,
+            "Unit_ID": None,
+            "Function_Code": None,
+            "Source": None,
+            "Destination": None,
+            "Control": None,
+            "Application_Control": None,
+            "Message_Type": None,
+            "Service": None,
+            "Request_ID": None,
+            "Response_Code": None,
+            "Service_Type": [0, 2],
+            "Frame_ID": [2, 6],
+            "Cycle_Counter": [6, 10],
+            "Payload": None
+        }
+    }
+}
 
-    file_name = gen_filename(output_file, 0)
-    with open(file_name, "w") as f:
-        f.write(mem_block)
-    print(f"Memory content written to {file_name}")
+# **🔹 Test the function**
+transport_header = "00070000001a015a00fe020a800393543bf093543bf010b2ffff030300140000"
 
+detected_profile = detect_protocol(transport_header, protocol_templates)
 
-def process_pcap(pcap_dir, plc_ip):
-    print(f"Processing PCAP files in directory: {pcap_dir} for IP: {plc_ip}")
-    pcap_files = [f for f in os.listdir(pcap_dir) if f.endswith('.pcapng')]
-
-    for pcap_file in pcap_files:
-        file_path = os.path.join(pcap_dir, pcap_file)
-        print(f"Analyzing {file_path}...")
-        cap = pyshark.FileCapture(file_path, display_filter=f"ip.addr == {plc_ip}" if plc_ip else None)
-
-        for packet in cap:
-            print(packet)
-        cap.close()
-
-    print("Finished processing PCAP files.")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="M221 Control Logic Profile and Reader")
-
-    parser.add_argument("--plc-ip", help="IP address of the target PLC", default=None)
-    parser.add_argument("--create-profile", action="store_true", help="Create a profile for the PLC")
-    parser.add_argument("--read", action="store_true", help="Read memory from PLC using profile")
-    parser.add_argument("--start-addr", type=lambda x: int(x, 16), help="Start memory address (in hex)", default=0)
-    parser.add_argument("--size", type=lambda x: int(x, 16), help="Byte size to read", default=0)
-    parser.add_argument("--output-file", help="Output file name", default="output.bin")
-    parser.add_argument("--pcap-dir", help="Directory containing PCAPNG files to analyze", default=None)
-
-    args = parser.parse_args()
-
-    if args.create_profile:
-        if args.plc_ip:
-            create_profile(args.plc_ip)
-        else:
-            print("Error: --create-profile requires --plc-ip.")
-
-    if args.read:
-        if args.plc_ip:
-            read_from_profile(args.plc_ip, args.start_addr, args.size, args.output_file)
-        else:
-            print("Error: --read requires --plc-ip.")
-
-    if args.pcap_dir:
-        process_pcap(args.pcap_dir, args.plc_ip)
-
-
-if __name__ == "__main__":
-    main()
+# **🔹 Save to profile.json**
+save_profile_json(detected_profile)
