@@ -79,7 +79,7 @@ def generate_protocol_data(raw_header, protocol_template):
 
 
 # **🔹 Load Protocol Template**
-protocol_templates = load_protocol_template("profile.json")
+protocol_templates = load_protocol_template("modbus_profile.json")
 
 # **🔹 Example Transport & Raw Data (Hex String Converted to Bytes)**
 raw_header = bytes.fromhex("00070000001a015a00fe020a800393543bf093543bf010b2ffff030300140000")

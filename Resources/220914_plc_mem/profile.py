@@ -7,6 +7,7 @@ import socket
 import struct
 from datetime import datetime
 import argparse
+from collections import Counter
 
 def extract_packet_data(pcap_file):
     raw_packets = []
@@ -228,10 +229,6 @@ def save_profile_json(data, filename="profile.json"):
         json.dump(data, f, indent=4)
     print(f"Profile saved to {filename}")
 
-from collections import Counter
-
-from collections import Counter
-
 
 def main():
     parser = argparse.ArgumentParser(description="PCAP Packet Extractor")
@@ -263,7 +260,6 @@ def main():
 
     # Save the majority profile and counts to the output file
     save_profile_json(majority_profile_template, args.output_file)  # Save the final profile to the JSON file
-
 
 if __name__ == "__main__":
     main()
