@@ -69,7 +69,7 @@ def train_rnn(csv_paths, model_name):
         ])
         model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-    model.fit(X, y, epochs=2, batch_size=32, verbose=1)
+    model.fit(X, y, epochs=50, batch_size=32, verbose=1)
     model.save(model_path)
 
     with open(tokenizer_path, "w") as f:

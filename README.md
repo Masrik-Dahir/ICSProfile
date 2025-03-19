@@ -6,7 +6,7 @@ pip install -e .
 2. python preprocessor.py "../Data/Packets" "modbus" --columns data func_code
 3. Run PREE Heuristic Builder (python ptree.py)
 4. python model.py "/Users/masrikdahir/repo/ICSProfile/Data/Train" "persistent"
-5. 
+5. python generate.py "/Users/masrikdahir/repo/ICSProfile/Data/Preprocessed" "persistent"
 
 
 

@@ -74,7 +74,17 @@ def generate_predictions(csv_path, model_name, header_line):
 
     # Append the guessed payload column to the original DataFrame.
     original_df['guessed_values'] = guessed_payloads
-    output_file = os.path.splitext(csv_path)[0] + "_guessed.csv"
+
+    # Create a Predict directory relative to the CSV file's directory
+    csv_dir = os.path.dirname(csv_path)
+    parent = get_parent_directory(project_path)
+    predict_dir = os.path.join(parent, "Data", "Predict")
+    os.makedirs(predict_dir, exist_ok=True)
+
+    # Build output file path using the base file name of the CSV file.
+    base_name = os.path.splitext(os.path.basename(csv_path))[0]
+    file_name = f"{base_name}.csv"
+    output_file = os.path.join(predict_dir, file_name)
 
     # Write CSV file using the header line from the header file as the first line.
     with open(output_file, "w", newline='') as f:
@@ -114,5 +124,13 @@ if __name__ == "__main__":
     print(header_line)
     print("=" * 80)
 
-    # Run prediction generation with the header line passed in
-    generate_predictions(csv_path, model_name, header_line)
+    # If the input path is a directory, process all CSV files in the directory.
+    if os.path.isdir(csv_path):
+        for file in os.listdir(csv_path):
+            if file.lower().endswith(".csv"):
+                file_path = os.path.join(csv_path, file)
+                print(f"Processing file: {file_path}")
+                generate_predictions(file_path, model_name, header_line)
+    else:
+        # Process a single CSV file
+        generate_predictions(csv_path, model_name, header_line)
