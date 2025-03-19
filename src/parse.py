@@ -4,6 +4,8 @@ import sys
 import pyshark
 import argparse
 
+from util import get_parent_directory
+
 
 def extract_protocols_from_pcap(pcap_path, filter_protocol=None):
     """
@@ -54,21 +56,6 @@ def extract_protocols_from_pcap(pcap_path, filter_protocol=None):
     # Close the capture file to release resources
     capture.close()
     return extracted_data
-
-
-def get_parent_directory(path):
-    """
-    Returns the parent directory of the given path.
-
-    Args:
-        path (str): The input file or directory path.
-
-    Returns:
-        str: The parent directory of the given path.
-        :param path: 
-        :return: 
-    """
-    return os.path.dirname(path)
 
 
 def save_protocols_to_json(pcap_path, output_dir, filter_protocol=None):

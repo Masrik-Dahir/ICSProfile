@@ -2,10 +2,11 @@
 
 pip install -e .
 
-1. python parse.py "../Resources/UMAS_pcap_Shade/CaptureTrafficWithTimer.pcapng" "modbus"
-2. python preprocessor.py "../Data/Packets/Capture Traffic with XIO.pcapng.json" "modbus" --columns data func_code
+1. python parse.py "../Resources/UMAS_pcap_Shade" "modbus"
+2. python preprocessor.py "../Data/Packets" "modbus" --columns data func_code
 3. Run PREE Heuristic Builder (python ptree.py)
-4. 
+4. python model.py "/Users/masrikdahir/repo/ICSProfile/Data/Train" "persistent"
+5. 
 
 
 

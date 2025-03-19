@@ -1,94 +1,59 @@
+import tensorflow as tf
+tf.compat.v1.enable_eager_execution()  # Enable eager execution
+
 import json
 import os
 import sys
 import numpy as np
-import tensorflow as tf
 import pandas as pd
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import SimpleRNN, Dense, Embedding
+from tensorflow.keras.layers import Embedding, LSTM, TimeDistributed, Dense
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
+from util import get_parent_directory
+
 
 def load_training_data(csv_path):
-    """
-    Loads and processes training data from a CSV file. The data is split into input data
-    and target data based on the columns of the CSV. Input data comprises the first three
-    columns: ParentProtocol, ParentData, and ParentFunctionCode, while target data
-    comprises the remaining columns starting from the fourth column onward. All data
-    is converted to a list of strings for compatibility with downstream processes.
+    # Try reading the CSV file while skipping problematic rows
+    df = pd.read_csv(csv_path, sep=',', on_bad_lines='skip')
+    # Optionally, print a sample to verify the format
+    # print(df.head())
 
-    :param csv_path: Path to the CSV file containing the training data.
-    :type csv_path: str
-    :return: A tuple containing two lists. The first list represents the input data extracted
-        from the first three columns of the CSV, and the second list represents the target
-        data extracted from the remaining columns of the CSV.
-    :rtype: tuple[list[list[str]], list[list[str]]]
-    """
-    df = pd.read_csv(csv_path)
-    input_data = df.iloc[:, :3].astype(str).values.tolist()  # ParentProtocol, ParentData, ParentFunctionCode
-    target_data = df.iloc[:, 3:].astype(str).values.tolist()  # TargetFunctionCode, TargetPayload, ...
+    input_data = df.iloc[:, :2].astype(str).values.tolist()  # Use first 2 columns as input
+    target_data = df.iloc[:, 2:].astype(str).values.tolist()  # Remaining columns as output
     return input_data, target_data
 
-
-def apply_weighting(sequences_input):
-    """
-    Applies a weighting strategy to each sequence in the provided input by increasing the weight
-    of specific sequence positions. The method modifies sequences of length 3 or greater by
-    repeating the first and third elements three times, while keeping other positions unchanged.
-    In case of sequences shorter than 3, they remain unmodified. The processed sequences are
-    collected and returned as a list.
-
-    :param sequences_input: A list of sequences represented as strings. Each sequence is processed to
-        apply specific weighting rules or left unchanged if its length is less than 3.
-    :type sequences_input: list[str]
-
-    :return: A list of processed sequences where weighted elements replaced certain positions
-        depending on the sequence's length and defined rules.
-    :rtype: list[str]
-    """
-    weighted_sequences = []
-    for seq in sequences_input:
-        if len(seq) >= 3:
-            weighted_seq = seq[:1] * 3 + seq[1:2] + seq[2:3] * 3 + seq[
-                                                                   3:]  # Higher weight on ParentProtocol and ParentFunctionCode
-        else:
-            weighted_seq = seq  # In case of incomplete sequences
-        weighted_sequences.append(weighted_seq)
-    return weighted_sequences
-
-
-def train_rnn(csv_path, model_name="persistent_model"):
-    """
-    Trains a Recurrent Neural Network (RNN) model on the given dataset specified as
-    a CSV file. The method preprocesses input and target sequences, applies sequence
-    weighting, tokenizes the text, and pads the sequences to prepare them for training.
-    It either updates an existing model or creates and saves a new one along with its tokenizer.
-
-    :param csv_path: Path to the CSV file containing training data.
-    :type csv_path: str
-    :param model_name: Name for saving the model and its tokenizer. Defaults to "persistent_model".
-    :type model_name: str, optional
-    :return: None
-    """
-    input_data, target_data = load_training_data(csv_path)
-
+def train_rnn(csv_paths, model_name):
     tokenizer = Tokenizer()
-    tokenizer.fit_on_texts(input_data + target_data)
-    sequences_input = tokenizer.texts_to_sequences(input_data)
-    sequences_target = tokenizer.texts_to_sequences(target_data)
+    all_input_data, all_target_data = [], []
 
-    sequences_input = apply_weighting(sequences_input)  # Apply weighting to input sequences
+    for csv_path in csv_paths:
+        input_data, target_data = load_training_data(csv_path)
+        all_input_data.extend(input_data)
+        all_target_data.extend(target_data)
+
+    tokenizer.fit_on_texts(all_input_data + all_target_data)
+    sequences_input = tokenizer.texts_to_sequences(all_input_data)
+    sequences_target = tokenizer.texts_to_sequences(all_target_data)
 
     vocab_size = len(tokenizer.word_index) + 1
-    max_length = max(len(seq) for seq in sequences_input + sequences_target)
+    max_length_input = max(len(seq) for seq in sequences_input)  # Input is fixed to 2 columns
+    max_length_target = max(len(seq) for seq in sequences_target)  # Output can be variable length
 
+    # Ensure y has the same sequence length as X for proper shape alignment
+    max_length = max(max_length_input, max_length_target)
     X = pad_sequences(sequences_input, maxlen=max_length, padding='post')
     y = pad_sequences(sequences_target, maxlen=max_length, padding='post')
-    y = tf.keras.utils.to_categorical(y, num_classes=vocab_size)
+    y = np.expand_dims(y, -1)  # Ensure correct output shape
 
-    model_path = f"models/{model_name}.h5"
-    tokenizer_path = f"models/{model_name}_tokenizer.json"
+    project_path = os.path.dirname(os.path.abspath(__file__))
+    parent = get_parent_directory(project_path)
+    model_dir = os.path.join(parent, "Data", "Model")
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, f"{model_name}.h5")
+    tokenizer_path = os.path.join(model_dir, f"{model_name}_tokenizer.json")
+    header_file_path = os.path.join(model_dir, f"{model_name}_header.txt")
 
     if os.path.exists(model_path):
         model = load_model(model_path)
@@ -97,27 +62,42 @@ def train_rnn(csv_path, model_name="persistent_model"):
         tokenizer.word_index.update(existing_tokenizer)
     else:
         model = Sequential([
-            Embedding(vocab_size, 10, input_length=max_length),
-            SimpleRNN(50, return_sequences=True),
-            SimpleRNN(50),
-            Dense(vocab_size, activation='softmax')
+            Embedding(vocab_size, 128, input_length=max_length),
+            LSTM(128, return_sequences=True),
+            LSTM(128, return_sequences=True),
+            TimeDistributed(Dense(vocab_size, activation='softmax'))
         ])
-        model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+        model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-    model.fit(X, y, epochs=50, verbose=0)
-
-    os.makedirs("models", exist_ok=True)
+    model.fit(X, y, epochs=2, batch_size=32, verbose=1)
     model.save(model_path)
+
     with open(tokenizer_path, "w") as f:
         json.dump(tokenizer.word_index, f)
 
-    print(f"Model '{model_name}.h5' updated and saved successfully in 'models/' directory.")
+    # Save the CSV headers to a text file using the first CSV file as reference
+    df_header = pd.read_csv(csv_paths[0], sep=',', nrows=0)
+    headers = list(df_header.columns)
+    with open(header_file_path, "w") as f:
+        f.write(",".join(headers))
 
+    print(f"Model '{model_name}.h5', tokenizer '{model_name}_tokenizer.json', and header file '{model_name}_header.txt' updated and saved successfully in '{model_dir}' directory.")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python train.py <csv_path>")
+    if len(sys.argv) != 3:
+        print("Usage: python train.py <csv_path_or_directory> <model_name>")
         sys.exit(1)
 
     csv_path = sys.argv[1]
-    train_rnn(csv_path)
+    model_name = sys.argv[2]
+
+    if os.path.isdir(csv_path):
+        csv_files = [os.path.join(csv_path, f) for f in os.listdir(csv_path) if f.endswith(".csv")]
+    else:
+        csv_files = [csv_path]
+
+    if not csv_files:
+        print("No CSV files found to process.")
+        sys.exit(1)
+
+    train_rnn(csv_files, model_name)

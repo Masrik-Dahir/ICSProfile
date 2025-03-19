@@ -53,7 +53,7 @@ def process_umas_data(input_path, output_dir):
         # Applying extraction functions to create new columns
         df["target_code"] = df["parent_data"].apply(extract_target_code)
         df["target_payload"] = df["parent_data"].apply(extract_target_payload)
-        df["target_transaction_id"] = df["parent_data"].apply(extract_target_transaction_id)
+        # df["target_transaction_id"] = df["parent_data"].apply(extract_target_transaction_id)
 
         # Construct output file path
         output_file_path = os.path.join(output_dir, os.path.basename(file))
